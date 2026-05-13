@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Pexip Subnet → Media Location</title>
+  <style>
+    :root {
+      --bg: #0f1115;
+      --panel: #181b22;
+      --panel-2: #1f232c;
+      --border: #2a2f3a;
+      --text: #e6e8ee;
+      --muted: #9aa3b2;
+      --accent: #4f8cff;
+      --accent-2: #2f6fe6;
+      --danger: #e0556d;
+      --ok: #3ec28f;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; padding: 24px; font: 14px/1.45 -apple-system, BlinkMacSystemFont,
+        "Segoe UI", system-ui, sans-serif;
+      background: var(--bg); color: var(--text);
+    }
+    h1 { margin: 0 0 4px; font-size: 20px; }
+    .sub { color: var(--muted); margin: 0 0 20px; }
+    .panel {
+      background: var(--panel); border: 1px solid var(--border);
+      border-radius: 10px; padding: 16px; margin-bottom: 16px;
+    }
+    .panel h2 { margin: 0 0 12px; font-size: 14px; font-weight: 600;
+      letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
+    label { display: block; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+    input[type=text] {
+      width: 100%;
+      background: var(--panel-2); color: var(--text);
+      border: 1px solid var(--border); border-radius: 6px;
+      padding: 6px 8px; font: inherit;
+    }
+    input[type=text]:focus { outline: none; border-color: var(--accent); }
+    .row { display: grid; gap: 12px; }
+    .defaults { grid-template-columns: 1fr 2fr; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 6px; text-align: left; vertical-align: top; }
+    th {
+      font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em;
+      color: var(--muted); border-bottom: 1px solid var(--border); padding-bottom: 8px;
+    }
+    td { border-bottom: 1px solid var(--border); }
+    tr:last-child td { border-bottom: none; }
+    .col-subnet { width: 18%; }
+    .col-loc { width: 16%; }
+    .col-overflow { width: 22%; }
+    .col-desc { width: 30%; }
+    .col-act { width: 80px; text-align: right; }
+    button {
+      background: var(--accent); color: white; border: none; border-radius: 6px;
+      padding: 7px 12px; font: inherit; font-weight: 500; cursor: pointer;
+    }
+    button:hover { background: var(--accent-2); }
+    button.ghost {
+      background: transparent; color: var(--text); border: 1px solid var(--border);
+    }
+    button.ghost:hover { background: var(--panel-2); }
+    button.danger { background: transparent; color: var(--danger); border: 1px solid transparent; padding: 4px 8px; }
+    button.danger:hover { border-color: var(--danger); }
+    .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
+    .status {
+      margin-left: auto; align-self: center; font-size: 13px;
+      color: var(--muted); transition: color 0.2s;
+    }
+    .status.ok { color: var(--ok); }
+    .status.err { color: var(--danger); }
+    .lookup { display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: end; }
+    .lookup-result {
+      margin-top: 12px; padding: 10px 12px; background: var(--panel-2);
+      border: 1px solid var(--border); border-radius: 6px; font-family: ui-monospace, monospace;
+      font-size: 13px; white-space: pre-wrap; min-height: 1.2em;
+    }
+    .footer-note { color: var(--muted); font-size: 12px; margin-top: 8px; }
+    .invalid { border-color: var(--danger) !important; }
+  </style>
+</head>
+<body>
+  <h1>Pexip Subnet → Media Location</h1>
+  <p class="sub">
+    Edit the subnet map. Longest prefix wins. Location names must match Pexip system locations exactly —
+    a typo here makes Pexip ignore the entire response and use its own default allocation.
+  </p>
+
+  <div class="panel">
+    <h2>Defaults (used when no subnet matches)</h2>
+    <div class="row defaults">
+      <div>
+        <label for="default-location">Default location</label>
+        <input id="default-location" type="text" placeholder="e.g. London" />
+      </div>
+      <div>
+        <label for="default-overflow">Default overflow locations (comma-separated)</label>
+        <input id="default-overflow" type="text" placeholder="Frankfurt, Amsterdam" />
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Subnet mappings</h2>
+    <table id="mappings">
+      <thead>
+        <tr>
+          <th class="col-subnet">Subnet (CIDR)</th>
+          <th class="col-loc">Location</th>
+          <th class="col-overflow">Overflow (comma-separated)</th>
+          <th class="col-desc">Description</th>
+          <th class="col-act"></th>
+        </tr>
+      </thead>
+      <tbody id="mappings-body"></tbody>
+    </table>
+    <div class="actions">
+      <button class="ghost" id="add-row">+ Add row</button>
+      <div class="status" id="save-status"></div>
+      <button class="ghost" id="reload-btn">Reload from disk</button>
+      <button id="save-btn">Save</button>
+    </div>
+    <p class="footer-note">Saving writes <code>subnet_map.json</code> atomically and hot-reloads the in-memory map.</p>
+  </div>
+
+  <div class="panel">
+    <h2>Test lookup</h2>
+    <div class="lookup">
+      <div>
+        <label for="lookup-ip">IP address</label>
+        <input id="lookup-ip" type="text" placeholder="10.10.4.7 or 2001:db8::1" />
+      </div>
+      <button id="lookup-btn">Lookup</button>
+    </div>
+    <div id="lookup-result" class="lookup-result"></div>
+    <p class="footer-note">Tests the in-memory map. Save your edits first if you want to test the new state.</p>
+  </div>
+
+<script>
+const $ = (sel) => document.querySelector(sel);
+const tbody = $("#mappings-body");
+
+function setStatus(msg, kind) {
+  const el = $("#save-status");
+  el.textContent = msg;
+  el.className = "status" + (kind ? " " + kind : "");
+}
+
+function rowTemplate(m = {}) {
+  const tr = document.createElement("tr");
+  tr.innerHTML = `
+    <td><input type="text" class="m-subnet" placeholder="10.0.0.0/24"></td>
+    <td><input type="text" class="m-location" placeholder="Oslo"></td>
+    <td><input type="text" class="m-overflow" placeholder="London, Frankfurt"></td>
+    <td><input type="text" class="m-desc" placeholder="optional notes"></td>
+    <td class="col-act"><button class="danger" type="button">Remove</button></td>
+  `;
+  tr.querySelector(".m-subnet").value = m.subnet || "";
+  tr.querySelector(".m-location").value = m.location || "";
+  tr.querySelector(".m-overflow").value = (m.overflow_locations || []).join(", ");
+  tr.querySelector(".m-desc").value = m.description || "";
+  tr.querySelector("button.danger").addEventListener("click", () => tr.remove());
+  return tr;
+}
+
+function renderConfig(cfg) {
+  $("#default-location").value = cfg.default_location || "";
+  $("#default-overflow").value = (cfg.default_overflow_locations || []).join(", ");
+  tbody.innerHTML = "";
+  for (const m of (cfg.mappings || [])) tbody.appendChild(rowTemplate(m));
+}
+
+function collectConfig() {
+  const splitCsv = (s) => s.split(",").map((x) => x.trim()).filter(Boolean);
+  const mappings = [];
+  for (const tr of tbody.querySelectorAll("tr")) {
+    const subnet = tr.querySelector(".m-subnet").value.trim();
+    const location = tr.querySelector(".m-location").value.trim();
+    if (!subnet && !location) continue;
+    mappings.push({
+      subnet,
+      location,
+      overflow_locations: splitCsv(tr.querySelector(".m-overflow").value),
+      description: tr.querySelector(".m-desc").value.trim(),
+    });
+  }
+  return {
+    default_location: $("#default-location").value.trim(),
+    default_overflow_locations: splitCsv($("#default-overflow").value),
+    mappings,
+  };
+}
+
+async function loadConfig() {
+  setStatus("Loading…");
+  const r = await fetch("/admin/config", { credentials: "same-origin" });
+  if (!r.ok) { setStatus("Load failed: " + r.status, "err"); return; }
+  renderConfig(await r.json());
+  setStatus("Loaded", "ok");
+}
+
+async function saveConfig() {
+  // Clear any prior invalid markers.
+  document.querySelectorAll(".invalid").forEach((el) => el.classList.remove("invalid"));
+  setStatus("Saving…");
+  const body = JSON.stringify(collectConfig());
+  const r = await fetch("/admin/config", {
+    method: "PUT",
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json" },
+    body,
+  });
+  if (r.ok) {
+    const j = await r.json();
+    setStatus(`Saved — ${j.subnet_map_entries} entries active`, "ok");
+    return;
+  }
+  // Try to highlight invalid CIDR row(s) from Pydantic's error response.
+  try {
+    const err = await r.json();
+    const rows = tbody.querySelectorAll("tr");
+    for (const detail of (err.detail || [])) {
+      const loc = detail.loc || [];
+      const idx = loc.indexOf("mappings");
+      if (idx >= 0 && typeof loc[idx + 1] === "number") {
+        const row = rows[loc[idx + 1]];
+        if (row) row.querySelector(".m-subnet").classList.add("invalid");
+      }
+    }
+    setStatus("Save failed: " + (err.detail?.[0]?.msg || r.status), "err");
+  } catch {
+    setStatus("Save failed: " + r.status, "err");
+  }
+}
+
+async function lookup() {
+  const ip = $("#lookup-ip").value.trim();
+  const out = $("#lookup-result");
+  if (!ip) { out.textContent = ""; return; }
+  const r = await fetch("/admin/lookup?ip=" + encodeURIComponent(ip),
+    { credentials: "same-origin" });
+  if (!r.ok) { out.textContent = "Lookup failed: " + r.status; return; }
+  const j = await r.json();
+  const overflow = (j.overflow_locations || []).join(", ") || "(none)";
+  out.textContent =
+    `IP:             ${j.ip}\n` +
+    `Matched subnet: ${j.matched_subnet || "(none — using default)"}\n` +
+    `Location:       ${j.location}\n` +
+    `Overflow:       ${overflow}`;
+}
+
+$("#add-row").addEventListener("click", () => tbody.appendChild(rowTemplate()));
+$("#save-btn").addEventListener("click", saveConfig);
+$("#reload-btn").addEventListener("click", loadConfig);
+$("#lookup-btn").addEventListener("click", lookup);
+$("#lookup-ip").addEventListener("keydown", (e) => { if (e.key === "Enter") lookup(); });
+
+loadConfig();
+</script>
+</body>
+</html>

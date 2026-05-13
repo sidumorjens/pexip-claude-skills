@@ -4,6 +4,8 @@
 
 Determines which Pexip Infinity **system location** handles the call media for a participant. A Conferencing Node assigned to that location will be selected to handle media. Typically fires after `service_configuration` and `participant_properties`.
 
+> **Looking for a complete working server?** [`examples/media-location-subnet-router/`](../examples/media-location-subnet-router/) implements this endpoint with longest-prefix subnet matching, an editor UI, and atomic config writes — alongside an honest case study of where this skill helped and where it didn't.
+
 ---
 
 ## Request Parameters

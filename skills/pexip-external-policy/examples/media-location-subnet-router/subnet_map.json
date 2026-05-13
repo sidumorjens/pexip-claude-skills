@@ -1,0 +1,34 @@
+{
+  "default_location": "London",
+  "default_overflow_locations": [
+    "Frankfurt",
+    "Amsterdam"
+  ],
+  "mappings": [
+    {
+      "subnet": "10.0.1.12/32",
+      "location": "osl",
+      "overflow_locations": [
+        "syd"
+      ],
+      "description": "Nordics corporate network"
+    },
+    {
+      "subnet": "10.0.2.10/32",
+      "location": "syd",
+      "overflow_locations": [
+        "osl"
+      ],
+      "description": "APAC corporate network"
+    },
+    {
+      "subnet": "10.30.0.0/16",
+      "location": "New York",
+      "overflow_locations": [
+        "Toronto",
+        "London"
+      ],
+      "description": "Americas corporate network"
+    }
+  ]
+}

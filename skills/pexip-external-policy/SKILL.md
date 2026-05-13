@@ -37,6 +37,7 @@ from building production policy servers, visual policy studios, ABAC enforcement
 | Build breakout rooms via policy | §6 below + `references/service-configuration.md` |
 | Enforce ABAC / attribute-based controls | §7 below |
 | Debug a non-working policy server | §9 below |
+| See a complete working server | `examples/media-location-subnet-router/` — subnet→media-location, with admin UI and atomic config edits. Read its `CASE_STUDY.md` for an honest eval of which parts of this skill carried the build. |
 
 Each reference file contains the **complete** request parameter list, the **complete** response field
 specification with types and defaults, and worked examples. The body of this SKILL.md covers the
@@ -390,6 +391,8 @@ For external lookups, prefer a stale-while-revalidate pattern (serve old data, r
 - [ ] External lookups have timeouts well under 5s and aggressive caching
 - [ ] Health endpoint reports the loaded-config mtime/version so operators can confirm a reload landed
 - [ ] Config file is version-controlled (even if edits happen via UI, snapshot periodically)
+
+> **Worked example:** `examples/media-location-subnet-router/` puts every pattern in this section into a single ~300-line FastAPI server with a vanilla-JS admin UI. Read [`policy_server.py`](examples/media-location-subnet-router/policy_server.py) for the atomic-write/validate/reload flow and [`CASE_STUDY.md`](examples/media-location-subnet-router/CASE_STUDY.md) for the honest eval.
 
 ---
 
