@@ -149,3 +149,41 @@ With `ignore_local` defaulting to `false`, this means "I have no policy entries 
 - `q` may be very short (1-2 characters as the user types). Either implement debounced searches client-side (not your option — Pexip controls this) or cache prefix searches.
 - Return at most `limit` (10) entries; returning more is wasteful and may be ignored.
 - Sort by relevance: exact matches first, then prefix matches, then substring matches.
+
+---
+
+## Test with curl
+
+Pexip uses HTTP GET with Basic Auth. Exercise your server end-to-end without Pexip:
+
+```bash
+# Search query
+curl -u user:pass "http://localhost:8080/policy/v1/registrations\
+?q=ali\
+&registration_alias=bob@example.com\
+&limit=10\
+&location=London\
+&node_ip=10.44.155.21\
+&pseudo_version_id=77683.0.0\
+&version_id=39"
+
+# Empty query — common as the user is about to type
+curl -u user:pass "http://localhost:8080/policy/v1/registrations\
+?q=\
+&registration_alias=bob@example.com\
+&limit=10\
+&location=London\
+&node_ip=10.44.155.21\
+&pseudo_version_id=77683.0.0\
+&version_id=39"
+```
+
+A valid response should be `200 OK` with `Content-Type: application/json` and a body that includes `"status": "success"` and a `result` array.
+
+Quick sanity checks to script against:
+
+- `jq -e '.status == "success"'`
+- `jq -e '.result | type == "array"'` — must be a list, not an object
+- `jq -e '.result | length <= 10'` — at-or-below the `limit`
+- `jq -e 'all(.result[]; .alias and .description and (.username // "") | type == "string")'` — every entry has the required keys
+- For the ACL path: vary `registration_alias` and confirm the returned list differs as expected

@@ -292,3 +292,53 @@ async def participant_properties(request: Request, _=Depends(check_auth)):
         "result": overrides
     })
 ```
+
+---
+
+## Test with curl
+
+Pexip uses HTTP GET with Basic Auth. Exercise your server end-to-end without Pexip — note `idp_attribute_*` parameters appear as individual query keys, and multi-valued attributes repeat the key:
+
+```bash
+curl -u user:pass "http://localhost:8080/policy/v1/participant/properties\
+?call_direction=dial_in\
+&protocol=webrtc\
+&bandwidth=0\
+&registered=False\
+&trigger=web\
+&remote_display_name=Alice\
+&remote_alias=alice@example.com\
+&remote_address=10.44.151.5\
+&remote_port=58435\
+&idp_uuid=00000000-0000-0000-0000-000000000001\
+&has_authenticated_display_name=True\
+&supports_direct_media=False\
+&teams_tenant_id=\
+&location=London\
+&node_ip=10.144.101.21\
+&version_id=39\
+&pseudo_version_id=77683.0.0\
+&preauthenticated_role=chair\
+&participant_type=standard\
+&participant_uuid=a13e1e71-0000-0000-0000-000000000001\
+&call_uuid=a13e1e71-0000-0000-0000-000000000001\
+&local_alias=meet.bob\
+&unique_service_name=meet.bob\
+&service_name=meet.bob\
+&service_tag=meet.bob.tag\
+&receive_from_audio_mix=main\
+&send_to_audio_mixes_mix_name=main\
+&send_to_audio_mixes_prominent=False\
+&idp_attribute_clearance=SECRET\
+&idp_attribute_groups=analysts\
+&idp_attribute_groups=managers"
+```
+
+A valid response should be `200 OK` with `Content-Type: application/json` and a body that includes `"status": "success"`.
+
+Quick sanity checks to script against:
+
+- `jq -e '.status == "success"'`
+- For an ABAC-allow path: `jq -e '.action != "reject"'` and inspect `.result` for expected overrides (e.g. `preauthenticated_role`, `rx_presentation_policy`)
+- For an ABAC-deny path: `jq -e '.action == "reject" and (.result.reject_reason | type == "string")'`
+- Drop or change `idp_attribute_clearance` to verify your deny branch fires

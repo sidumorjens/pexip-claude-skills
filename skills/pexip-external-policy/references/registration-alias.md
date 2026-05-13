@@ -171,3 +171,51 @@ async def registration_alias(alias: str, request: Request, _=Depends(check_auth)
 - **Rotate passwords aggressively** — these are device registration secrets, not user passwords. Compromise of the policy server should not let an attacker permanently register devices.
 - **Rate-limit unknown aliases** in your policy server to defend against alias enumeration / brute-force attacks.
 - **Log every registration request** with IP, alias, and decision for audit.
+
+---
+
+## Test with curl
+
+Pexip uses HTTP GET with Basic Auth. The alias goes in the URL path, not the query string. Exercise the credentials path, the SSO path, and the reject path separately:
+
+```bash
+# Known alias, credentials auth — should return username/password
+curl -u user:pass "http://localhost:8080/policy/v1/registrations/alice@example.com\
+?protocol=webrtc\
+&auth_type=credentials\
+&location=London\
+&node_ip=10.44.155.21\
+&remote_address=10.44.151.5\
+&pseudo_version_id=77683.0.0\
+&version_id=39"
+
+# SSO registration — server should allow without credentials
+curl -u user:pass "http://localhost:8080/policy/v1/registrations/alice@example.com\
+?protocol=webrtc\
+&auth_type=sso\
+&location=London\
+&node_ip=10.44.155.21\
+&remote_address=10.44.151.5\
+&pseudo_version_id=77683.0.0\
+&version_id=39"
+
+# Unknown alias — should reject
+curl -u user:pass "http://localhost:8080/policy/v1/registrations/nobody@example.com\
+?protocol=webrtc\
+&auth_type=credentials\
+&location=London\
+&node_ip=10.44.155.21\
+&remote_address=10.44.151.5\
+&pseudo_version_id=77683.0.0\
+&version_id=39"
+```
+
+A valid response should be `200 OK` with `Content-Type: application/json` and a body that includes `"status": "success"`.
+
+Quick sanity checks to script against:
+
+- `jq -e '.status == "success"'`
+- Allow path: `jq -e '.action != "reject" and (.result.username | type == "string") and (.result.password | type == "string")'`
+- Reject path: `jq -e '.action == "reject"'`
+- SSO path: `jq -e '.action != "reject" and .result == {}'` (empty result expected for SSO)
+- Confirm the response is sent over **HTTPS** in any non-dev environment — the password is in clear text in the body

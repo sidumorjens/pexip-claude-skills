@@ -501,3 +501,40 @@ When `call_direction=dial_out`, the response **must match the existing service d
 
 - `prefer_ipv6` in the service_configuration response
 - The media location (via the subsequent media_location request)
+
+---
+
+## Test with curl
+
+Pexip uses HTTP GET with Basic Auth. Exercise your server end-to-end without Pexip:
+
+```bash
+curl -u user:pass "http://localhost:8080/policy/v1/service/configuration\
+?call_direction=dial_in\
+&protocol=webrtc\
+&bandwidth=0\
+&registered=False\
+&trigger=web\
+&remote_display_name=Alice\
+&remote_alias=alice@example.com\
+&remote_address=10.44.151.5\
+&remote_port=58435\
+&call_tag=\
+&idp_uuid=\
+&has_authenticated_display_name=False\
+&supports_direct_media=False\
+&teams_tenant_id=\
+&location=London\
+&node_ip=10.144.101.21\
+&version_id=39\
+&pseudo_version_id=77683.0.0\
+&local_alias=meet.bob"
+```
+
+A valid response should be `200 OK` with `Content-Type: application/json` and a body that includes `"status": "success"`.
+
+Quick sanity checks to script against:
+
+- `jq -e '.status == "success"'`
+- `jq -e '.result.name and .result.service_type and .result.service_tag'` — required fields for conference/lecture/etc. are present
+- For a redirect test: pass `local_alias=` set to your redirect trigger and assert `jq -e '.action == "redirect" and (.result.new_alias | type == "string")'`

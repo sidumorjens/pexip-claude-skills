@@ -165,3 +165,56 @@ async def participant_avatar(alias: str, request: Request, _=Depends(check_auth)
 4. **Handle the alias scheme.** SIP aliases include `sip:`; SfB may include `sip:` or have `;tag=`; WebRTC aliases often don't.
 5. **Bound the upstream call** with a tight timeout (1-2s) — the 5s Pexip budget is shared with your lookup.
 6. **CMYK → RGB conversion** is the most common image-format trap. JPEGs from cameras are often CMYK.
+
+---
+
+## Test with curl
+
+This endpoint returns binary JPEG, not JSON — write the body to a file and inspect it. The alias goes in the URL path, not the query string:
+
+```bash
+# Successful avatar fetch — should save a valid JPEG
+curl -u user:pass -o /tmp/avatar.jpg -w "HTTP %{http_code}  type=%{content_type}  bytes=%{size_download}\n" \
+  "http://localhost:8080/policy/v1/participant/avatar/alice@example.com\
+?protocol=webrtc\
+&node_ip=10.44.99.2\
+&service_name=meet.bob\
+&registered=False\
+&remote_address=10.44.75.250\
+&version_id=39\
+&service_tag=\
+&bandwidth=0\
+&pseudo_version_id=77683.0.0\
+&height=100\
+&width=100\
+&unique_service_name=meet.bob\
+&local_alias=meet.bob\
+&remote_port=58426\
+&idp_uuid=\
+&has_authenticated_display_name=False\
+&supports_direct_media=False\
+&call_direction=dial_in\
+&remote_alias=alice@example.com\
+&remote_display_name=Alice\
+&trigger=invite\
+&role=chair\
+&location=London"
+
+# Verify the file is what Pexip expects
+file /tmp/avatar.jpg                # → "JPEG image data, JFIF standard ..."
+identify -format "%w x %h  %[colorspace]\n" /tmp/avatar.jpg   # ImageMagick: confirm dimensions + RGB
+```
+
+Sanity checks Pexip will silently fail on if any are wrong:
+
+- HTTP `200` with `Content-Type: image/jpeg` (anything else → Pexip serves a placeholder)
+- Dimensions match the requested `width` × `height` exactly
+- Color space is RGB (or RGBA) — not CMYK or grayscale-with-no-profile
+
+For the **404 / placeholder** path, hit an unknown alias and confirm:
+
+```bash
+curl -u user:pass -o /dev/null -w "HTTP %{http_code}\n" \
+  "http://localhost:8080/policy/v1/participant/avatar/nobody@example.com?width=100&height=100&node_ip=10.0.0.1&version_id=39&pseudo_version_id=77683.0.0&location=London&registered=True"
+# → HTTP 404
+```

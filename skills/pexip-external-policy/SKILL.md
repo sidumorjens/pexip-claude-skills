@@ -33,9 +33,10 @@ from building production policy servers, visual policy studios, ABAC enforcement
 | Serve participant or directory avatar images (JPEG) | `references/participant-avatar.md` |
 | Provide phonebook entries to registered Pexip apps | `references/directory-information.md` |
 | Allow/deny device registration to Pexip | `references/registration-alias.md` |
-| Build breakout rooms via policy | §5 below + `references/service-configuration.md` |
-| Enforce ABAC / attribute-based controls | §6 below |
-| Debug a non-working policy server | §8 below |
+| Manage operator-edited policy data (subnet maps, ACLs, etc.) | §5 below |
+| Build breakout rooms via policy | §6 below + `references/service-configuration.md` |
+| Enforce ABAC / attribute-based controls | §7 below |
+| Debug a non-working policy server | §9 below |
 
 Each reference file contains the **complete** request parameter list, the **complete** response field
 specification with types and defaults, and worked examples. The body of this SKILL.md covers the
@@ -290,7 +291,109 @@ server {
 
 ---
 
-## 5. Breakout Rooms via Policy
+## 5. Managing Policy Data
+
+The skeleton in §4 covers the *protocol* — how to answer Pexip. But every non-trivial policy server has a second concern: **the data your decision depends on** (subnet maps, ACLs, breakout configurations, IdP-attribute-to-role rules, etc.). The patterns below apply regardless of which of the six request types your policy is making decisions for.
+
+### Where to keep the data
+
+| Source | When to use | Notes |
+|---|---|---|
+| **File on disk (JSON/YAML)** | Single instance, < few thousand entries, operator-edited | Simplest. Make hot-reloadable so operators don't restart. Atomic writes (below) are non-negotiable once humans edit it. |
+| **External database** | Multi-instance policy servers, large datasets, transactional updates | Tight timeout (<500ms) — you have 5s total per Pexip request. Cache aggressively in-process. |
+| **Secrets manager** (Vault, AWS SM, etc.) | Credentials, API keys, registration passwords | Don't read on the request hot path; fetch at startup or via background refresh. |
+| **In-memory only** | Truly static config baked into the image | No operational story for updates. Avoid except for genuinely fixed rules. |
+
+### Hot reload pattern
+
+Operators editing config should not need a process restart. Two reliable approaches:
+
+```python
+# 1. Explicit reload endpoint — call after edits land
+@app.post("/admin/reload")
+async def reload_config(_=Depends(check_auth)):
+    global POLICY_DATA
+    POLICY_DATA = load_from_disk()
+    return {"status": "reloaded", "entries": len(POLICY_DATA)}
+
+# 2. mtime check on every Pexip request (cheap, no signal needed)
+_data_mtime = 0
+def get_policy_data():
+    global POLICY_DATA, _data_mtime
+    mtime = os.path.getmtime(CONFIG_PATH)
+    if mtime > _data_mtime:
+        POLICY_DATA = load_from_disk()
+        _data_mtime = mtime
+    return POLICY_DATA
+```
+
+The mtime approach is zero-effort for operators but adds one `stat()` per request. Fine for most loads; if you're handling hundreds/sec, prefer the explicit endpoint and call it from the admin path that performs writes.
+
+### Atomic writes
+
+When operators edit config via an admin UI or API, **never write the live file directly**. A partial write — or a process death mid-write — leaves the policy server reading half-valid JSON on the next request. Pexip will silently fall back to its database because your response no longer parses.
+
+```python
+import json, os, tempfile
+
+def write_config_atomic(path: str, data: dict):
+    directory = os.path.dirname(path) or "."
+    # Tempfile in the SAME directory so os.replace is atomic on POSIX
+    fd, tmp = tempfile.mkstemp(prefix=".tmp.", dir=directory)
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(data, f, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)  # atomic on POSIX
+    except Exception:
+        os.unlink(tmp)
+        raise
+```
+
+### Validate before writing
+
+Operator input should be validated *before* it touches disk. A bad CIDR or a typo in a location name becomes a broken policy on the next request. Pydantic does this concisely:
+
+```python
+from pydantic import BaseModel, field_validator
+from ipaddress import ip_network
+
+class SubnetEntry(BaseModel):
+    subnet: str
+    location: str
+    overflow_locations: list[str] = []
+
+    @field_validator("subnet")
+    @classmethod
+    def valid_cidr(cls, v):
+        ip_network(v, strict=False)  # raises on malformed
+        return v
+```
+
+For fields that reference Pexip configuration (location names, theme names, IdP group names), consider cross-validating against the **Management API** at edit time — see §10 for the relevant endpoints. The classic trap: a subtle typo in a location name causes the **entire** media_location response to be deemed invalid by Pexip (see `references/media-location.md`).
+
+### Caching: internal config vs external lookups
+
+Two different cache concerns, often conflated:
+
+- **Internal config** (the file you control): cache the **parsed** form in-process. Reload on mtime change or explicit reload. No TTL needed — the data is authoritative.
+- **External lookups** (Graph, LDAP, DB): cache **by request-relevant key** with a short TTL (60s–5min). The 5s Pexip timeout is shared with your lookup; cache misses on the hot path will cause occasional timeouts.
+
+For external lookups, prefer a stale-while-revalidate pattern (serve old data, refresh in background) over a hard TTL — keeps tail latency predictable.
+
+### Operational checklist for operator-edited data
+
+- [ ] Atomic writes implemented (tempfile in same dir + `os.fsync` + `os.replace`)
+- [ ] Validation runs **before** write; original data preserved on failure
+- [ ] Hot reload is triggered by the admin write path (don't make operators remember to reload)
+- [ ] External lookups have timeouts well under 5s and aggressive caching
+- [ ] Health endpoint reports the loaded-config mtime/version so operators can confirm a reload landed
+- [ ] Config file is version-controlled (even if edits happen via UI, snapshot periodically)
+
+---
+
+## 6. Breakout Rooms via Policy
 
 Breakout rooms are sub-conferences inside a parent VMR. They are how you build per-participant
 waiting rooms, host-controlled admit flows, and topic-specific sub-meetings. The breakout fields
@@ -360,7 +463,7 @@ Your policy must respond to each of those with a breakout-room configuration blo
 
 ---
 
-## 6. ABAC (Attribute-Based Access Control)
+## 7. ABAC (Attribute-Based Access Control)
 
 ### Receiving IdP attributes
 
@@ -438,7 +541,7 @@ async def transfer_participant(mgmt_url, auth, participant_id, conference_alias,
 
 ---
 
-## 7. Dialing Out — Important Restrictions
+## 8. Dialing Out — Important Restrictions
 
 When Pexip Infinity is dialing out from an existing conference (`call_direction=dial_out`):
 
@@ -453,7 +556,7 @@ the dial-out via Management API rather than rejecting it in policy).
 
 ---
 
-## 8. Debugging Checklist
+## 9. Debugging Checklist
 
 ### Silent failure modes
 
@@ -473,13 +576,14 @@ the dial-out via Management API rather than rejecting it in policy).
 
 ### Testing without Pexip
 
-```bash
-# service_configuration
-curl -u user:pass "http://localhost:8080/policy/v1/service/configuration?call_direction=dial_in&protocol=webrtc&local_alias=meet.test@example.com&remote_alias=alice@example.com&remote_display_name=Alice&remote_address=10.1.1.5&location=Sydney&node_ip=10.1.1.1&version_id=39&pseudo_version_id=77683.0.0&trigger=web&registered=False&bandwidth=0&idp_uuid=&has_authenticated_display_name=False&supports_direct_media=False"
+Every reference file ends with a **"Test with curl"** block tuned to that request type's actual parameters, plus suggested `jq` sanity checks. Use those before connecting Pexip:
 
-# participant_properties
-curl -u user:pass "http://localhost:8080/policy/v1/participant/properties?call_direction=dial_in&protocol=webrtc&participant_uuid=a13e1e71-0000-0000-0000-000000000001&call_uuid=a13e1e71-0000-0000-0000-000000000001&preauthenticated_role=chair&participant_type=standard&service_name=my-vmr&service_tag=my-tag&local_alias=meet.test@example.com&remote_alias=alice@example.com&remote_display_name=Alice&location=Sydney&node_ip=10.1.1.1&version_id=39&idp_attribute_clearance=SECRET&idp_attribute_groups=guests&receive_from_audio_mix=main&send_to_audio_mixes_mix_name=main&send_to_audio_mixes_prominent=False"
-```
+- `references/service-configuration.md`
+- `references/participant-properties.md`
+- `references/media-location.md`
+- `references/participant-avatar.md` — note: returns binary JPEG, not JSON; verify `Content-Type` and dimensions
+- `references/directory-information.md`
+- `references/registration-alias.md`
 
 ### Built-in tools in Pexip admin
 
@@ -502,7 +606,7 @@ log.info("↑ %s → %s reason=%s",
 
 ---
 
-## 9. Quick Reference — Pexip Management API (for mid-call enforcement)
+## 10. Quick Reference — Pexip Management API (for mid-call enforcement)
 
 ```
 Base: https://<management-node>/api/admin/
@@ -539,7 +643,7 @@ Auth: HTTP Basic with admin credentials. Use `verify=False` for self-signed cert
 
 ---
 
-## 10. Pre-flight Checklist for a New Policy Server
+## 11. Pre-flight Checklist for a New Policy Server
 
 - [ ] All six endpoints implemented (or unused ones disabled in policy profile)
 - [ ] All responses use HTTP GET handlers
