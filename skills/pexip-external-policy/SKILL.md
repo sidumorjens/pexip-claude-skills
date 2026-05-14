@@ -37,7 +37,7 @@ from building production policy servers, visual policy studios, ABAC enforcement
 | Build breakout rooms via policy | §6 below + `references/service-configuration.md` |
 | Enforce ABAC / attribute-based controls | §7 below |
 | Debug a non-working policy server | §9 below |
-| See a complete working server | `examples/` — `media-location-subnet-router/` (subnet→location with admin UI; ships with a case study evaluating the skill) and `entra-avatar-lookup/` (Microsoft Graph photo proxy with OAuth2 token + photo caching). |
+| See a complete working server | `examples/` — `media-location-subnet-router/` (subnet→location with admin UI) and `entra-avatar-lookup/` (Microsoft Graph photo proxy with OAuth2 token + photo caching). Each ships with a `CASE_STUDY.md` evaluating which parts of this skill carried the build. |
 
 Each reference file contains the **complete** request parameter list, the **complete** response field
 specification with types and defaults, and worked examples. The body of this SKILL.md covers the
