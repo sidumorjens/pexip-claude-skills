@@ -65,13 +65,43 @@ ln -s "$(pwd)/skills/pexip-external-policy" ~/.claude/skills/pexip-external-poli
 
 Symlinking means `git pull` instantly updates the installed skill.
 
-## Verifying
+## Using a skill in Claude Code
 
-In Claude Code, ask something that should trigger one of the skills:
+Once installed, you can invoke a skill two ways.
 
-> "Help me draft an external policy server response for a Pexip breakout room."
+### Just ask — Claude picks it up automatically
 
-Claude should consult the relevant SKILL.md and respond with field-accurate, context-aware guidance.
+Each skill's `SKILL.md` declares the topics it covers in its frontmatter `description`. Natural prompts on a relevant topic pull the skill in without any ceremony:
+
+> "Help me build a FastAPI policy server that overrides participant roles based on IdP groups."
+
+> "What's the correct response shape for a Pexip breakout room?"
+
+> "My `media_location` response isn't being applied — what should I check?"
+
+Claude reads the relevant `SKILL.md` plus any `references/` files it needs and answers with field-accurate guidance.
+
+### Invoke explicitly with a slash command
+
+To force-load a skill at the start of a turn — useful when the topic isn't obvious from the prompt, or when you want to make sure Claude is grounded in the skill before you start — type the skill name as a slash command:
+
+```
+/pexip-external-policy create a sample external policy server that rejects calls from unauthenticated IdP groups
+```
+
+Claude loads the skill and treats the rest of your message as the request.
+
+### Confirming a skill is installed
+
+```bash
+ls ~/.claude/skills/
+```
+
+You should see one directory per installed skill, each containing a `SKILL.md`.
+
+### Worked end-to-end examples
+
+For complete builds — code, README, and a case study evaluating how the skill performed during the actual build — see [`skills/pexip-external-policy/examples/`](skills/pexip-external-policy/examples/).
 
 ## Contributing a new skill
 
