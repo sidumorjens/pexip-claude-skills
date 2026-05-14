@@ -4,6 +4,8 @@
 
 Returns a JPEG image representing a conference participant or directory contact. The `<alias>` in the URL path is the alias whose avatar is required (may include scheme, e.g. `sip:alice@example.com` — your server must parse this).
 
+> **Looking for a complete working server?** [`examples/entra-avatar-lookup/`](../examples/entra-avatar-lookup/) implements this endpoint backed by Microsoft Graph — OAuth2 client-credentials with cached/single-flight token refresh, per-UPN photo cache (including negative caching), alias-scheme stripping, and Pillow-based resize/colorspace conversion. Hits the timing constraints from §1 of the SKILL.
+
 **Critical:** This is the **only** policy endpoint that does NOT return JSON. It returns a JPEG image. If a valid JPEG isn't returned or the image is the wrong size, Pexip returns 404 to the requesting app, which then uses a placeholder image.
 
 ---
