@@ -66,7 +66,7 @@ whenever a lifecycle event occurs. Your server's job is to **acknowledge fast** 
 - **HTTP POST** (note: External Policy uses GET; Event Sinks use POST)
 - **Content-Type:** `application/json`
 - **HTTPS strongly recommended** in production
-- **Auth options:** Bearer token (`Authorization: Bearer <secret>`) is the modern, explicit option. Basic Auth is also supported. **IP allowlist** at the receiver is a common defence-in-depth — events come from a small, well-known set of Conferencing Node IPs.
+- **Auth:** **HTTP Basic Auth** — Pexip Infinity's event sink configuration takes a username and password and sends them as a standard `Authorization: Basic <base64(user:pass)>` header on every POST. **IP allowlist** at the receiver is a common defence-in-depth — events come from a small, well-known set of Conferencing Node IPs.
 - Pexip discards your response **body** — only the status code matters (typically `200` OK)
 - One sink URL receives **all enabled event types**; the event type is in the JSON payload
 - **Important:** events are emitted by **Transcoding** Conferencing Nodes only. Proxying Edge Nodes do not emit conference/participant events.
@@ -80,7 +80,7 @@ whenever a lifecycle event occurs. Your server's job is to **acknowledge fast** 
 Configured under **System > Event sinks > Add event sink**. Each sink has:
 
 - **URL** — your endpoint (e.g. `https://receiver.example.com/api/event_sink`)
-- **Bearer token** (optional but recommended) — your receiver checks `Authorization: Bearer <token>`
+- **Username / Password** — HTTP Basic Auth credentials Pexip sends on every POST. Your receiver validates them with `secrets.compare_digest` (see §3).
 - **Bulk support** toggle — when enabled, Pexip batches multiple events into a single POST as an `eventsink_bulk` envelope. Recommended for high-traffic deployments. (See §4 for unpack pattern.)
 - Per-event-class enable toggles
 - Verify-connection action that POSTs a synthetic event to test the URL + auth before going live
@@ -210,50 +210,62 @@ out-of-order arrival, and per-node restart loops.
 
 The key principle: **ACK fast, process asynchronously**. Returning `200 OK` quickly stops
 Pexip retrying; the actual work happens off the request thread. The receiver below uses
-the recommended Bearer token auth, handles both single events and `eventsink_bulk`, and
-routes by event name through a small registry.
+HTTP Basic Auth (matching what Pexip sends), handles both single events and
+`eventsink_bulk`, and routes by event name through a small registry.
 
 ```python
 import asyncio
 import logging
 import os
+import secrets
+from ipaddress import ip_address, ip_network
 
-from fastapi import FastAPI, Header, HTTPException, Request, Response
+from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s %(levelname)s %(name)s %(message)s")
 log = logging.getLogger("event-sink")
 
-EVENT_SINK_TOKEN = os.environ.get("EVENT_SINK_TOKEN")  # optional Bearer secret
-ALLOWED_SOURCES  = [s.strip() for s in os.getenv("ALLOWED_SINK_SOURCES", "").split(",") if s.strip()]
+SINK_USER = os.environ["SINK_USER"]      # match the username set on the Pexip sink
+SINK_PASS = os.environ["SINK_PASS"]      # match the password set on the Pexip sink
+ALLOWED_SOURCES = [s.strip() for s in os.getenv("ALLOWED_SINK_SOURCES", "").split(",") if s.strip()]
 
 app = FastAPI()
+security = HTTPBasic()
 
 # Off-thread processing queue (swap for Redis/SQS/Kafka in production — see §4)
 event_queue: asyncio.Queue = asyncio.Queue(maxsize=10_000)
 
 
-def _check_auth(request: Request, authorization: str | None) -> None:
-    """Bearer token if configured; else allow trusted IPs (defence-in-depth)."""
-    if EVENT_SINK_TOKEN:
-        expected = f"Bearer {EVENT_SINK_TOKEN}"
-        if authorization != expected:
-            raise HTTPException(status_code=401, detail="invalid token")
+def check_basic_auth(credentials: HTTPBasicCredentials = Depends(security)) -> None:
+    ok = (secrets.compare_digest(credentials.username, SINK_USER) and
+          secrets.compare_digest(credentials.password, SINK_PASS))
+    if not ok:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            headers={"WWW-Authenticate": "Basic"},
+        )
+
+
+def check_source_ip(request: Request) -> None:
+    """Optional defence-in-depth: reject anything not from a configured CN subnet."""
+    if not ALLOWED_SOURCES:
         return
-    # No token configured — fall back to IP allowlist if you've set one.
-    if ALLOWED_SOURCES:
-        from ipaddress import ip_address, ip_network
+    try:
         ip = ip_address(request.client.host)
-        if not any(ip in ip_network(n, strict=False) for n in ALLOWED_SOURCES):
-            raise HTTPException(status_code=401, detail="source not allowed")
+    except ValueError:
+        raise HTTPException(status_code=401, detail="invalid source")
+    if not any(ip in ip_network(n, strict=False) for n in ALLOWED_SOURCES):
+        raise HTTPException(status_code=401, detail="source not allowed")
 
 
 @app.post("/api/event_sink")
 async def receive_event(
     request: Request,
-    authorization: str | None = Header(default=None),
+    _auth: None = Depends(check_basic_auth),
 ):
-    _check_auth(request, authorization)
+    check_source_ip(request)
 
     try:
         payload = await request.json()
@@ -368,7 +380,8 @@ services:
   event-sink:
     build: .
     environment:
-      - EVENT_SINK_TOKEN=change-me
+      - SINK_USER=pexip                      # match the username configured on the Pexip sink
+      - SINK_PASS=change-me                  # match the password configured on the Pexip sink
       - ALLOWED_SINK_SOURCES=10.0.0.0/8,192.168.0.0/16
       - DATABASE_URL=postgresql://...
     expose:
@@ -615,7 +628,7 @@ systems without re-instrumenting Pexip.
 | **Many `seq` gaps from one node** | Receiver returned 5xx during a burst and Pexip dropped events after exhausting retries; or a CN restarted (seq resets on sink restart per node — gap is expected once). Alarm on sustained gaps, not single ones. |
 | **Receiver gets hammered with duplicates** | Your ACK is slow → Pexip retries → duplicates pile up. Profile the handler; ensure all real work is off the request thread. Check that `(node, seq)` dedup is in place. |
 | **Receiver intermittently 502/504 from upstream proxy** | Handler is slow + proxy timeout shorter than handler time. Either speed up the handler (almost always: queue + async) or extend the proxy timeout. |
-| **Auth failing** | Bearer token in Pexip sink config doesn't match what your server expects. Check exact value, no trailing whitespace, no implicit URL-encoding. |
+| **Auth failing** | HTTP Basic Auth username/password in Pexip's sink config doesn't match what your server expects. Check exact case, no trailing whitespace, no implicit URL-encoding of special characters. |
 | **Conferences appear to end too early** | Multi-node conference and your store removes on the first `conference_ended` instead of waiting for `active_nodes` to drain. Use the merge pattern in §4. |
 | **Conferences "linger" after they should have ended** | Reverse: some `conference_ended` events from one or more nodes never arrived (receiver was down during their emission). Add a stale-conference reaper (e.g. drop after 2h with no events). |
 | **Sink "receiving" indicator flaps** | Pattern: declare the sink stale if no event in the last ~2 minutes. Low-activity deployments may legitimately go quiet; tune the threshold to your traffic profile. |
@@ -630,8 +643,7 @@ systems without re-instrumenting Pexip.
 POST a representative payload yourself:
 
 ```bash
-TOKEN="change-me"
-curl -H "Authorization: Bearer $TOKEN" \
+curl -u pexip:change-me \
      -H "Content-Type: application/json" \
      -d @sample_conference_started.json \
      http://localhost:8080/api/event_sink
@@ -708,7 +720,7 @@ alone — and to spot dedup hits when the same `(node, seq)` shows up twice.
 ## 7. Pre-flight Checklist for a New Event Sink Receiver
 
 - [ ] HTTPS endpoint reachable from **every** Transcoding Conferencing Node (not just one — Proxying Edge Nodes don't emit, but every transcoding node does)
-- [ ] Bearer token validated on every request (or IP allowlist if you've chosen token-less + trusted-network)
+- [ ] HTTP Basic Auth (matching what Pexip's sink config sends) validated on every request; IP allowlist as defence-in-depth where the network allows
 - [ ] Endpoint returns `200` within Pexip's per-request timeout (⚠️ verify exact value for your version; budget under 1s)
 - [ ] All real processing happens **after** the ACK (queue + async worker pattern)
 - [ ] Every envelope is durably persisted to a raw log **before** any handler runs
