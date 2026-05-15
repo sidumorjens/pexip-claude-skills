@@ -52,6 +52,35 @@ plugin.events.authenticatedWithConference.add((info) => {
 **Gotcha:** some fields may appear under different names depending on Pexip
 version. Defensive access: `info.conferenceAlias || info.conference_alias`.
 
+**Conference alias at init time:** `authenticatedWithConference` fires
+asynchronously after join. If you need the alias earlier (e.g., during
+plugin initialization), parse it from the URL:
+
+```typescript
+function getConferenceAlias(): string {
+  // 1. Own URL hash params: /#/?conference=alias
+  const hashParams = new URLSearchParams(window.location.hash.split('?')[1] || '');
+  if (hashParams.get('conference')) return hashParams.get('conference')!;
+
+  // 2. Parent frame URL hash params (same-origin only)
+  try {
+    const parentHash = new URLSearchParams(
+      window.parent.location.hash.split('?')[1] || ''
+    );
+    if (parentHash.get('conference')) return parentHash.get('conference')!;
+  } catch { /* cross-origin */ }
+
+  // 3. URL pathname fallback: /meetingname/ -> "meetingname"
+  const path = window.location.pathname.replace(/^\/|\/$/g, '');
+  if (path) return path;
+
+  return '';
+}
+```
+
+Use the sync result as an early value, then update from the event when it fires.
+**(field-tested)**
+
 ---
 
 ## me

@@ -1,6 +1,6 @@
 # Gotchas and Pitfalls — Expanded Reference
 
-All 19 production-tested gotchas with reproduction steps, root causes, and
+All 22 production-tested gotchas with reproduction steps, root causes, and
 fixes. These are things that bit real developers on Pexip v39+.
 
 ---
@@ -331,5 +331,63 @@ fetch('https://server.example/api/action', {
     conference: conferenceAlias,  // Include alias
     action: 'some-action',
   }),
+});
+```
+
+---
+
+## 20. Singleton guard should use silent return, not throw
+
+**Symptom:** Console shows `Error: duplicate` or `Error: already initialized`
+on every plugin iframe reload.
+
+**Root cause:** Using `throw new Error('duplicate')` in the singleton guard
+creates noisy console output. Plugin iframes can reload during conference
+state changes.
+
+**Fix:** Use silent return instead of throwing:
+```typescript
+if ((globalThis as any).__myPluginInit) {
+  console.log('Already initialized, skipping');
+  return;
+}
+(globalThis as any).__myPluginInit = true;
+```
+
+---
+
+## 21. overlayText preferred over displayName for user-facing labels
+
+**Symptom:** Participant names shown in toasts or forms don't match what the
+host sees — they show the bare join name instead of the policy-assigned display
+name.
+
+**Root cause:** `display_name` (RPC) / `displayName` (events) contains the
+name the participant used when joining. `overlay_text` / `overlayText` contains
+the name set by the host or policy server (e.g., "John Doe | Major (L2)").
+
+**Fix:** Prefer overlayText with fallback:
+```typescript
+const label = participant.overlay_text || participant.display_name || 'Participant';
+```
+
+---
+
+## 22. Conference alias unavailable at plugin init time
+
+**Symptom:** Plugin needs the conference alias during initialization (before
+`authenticatedWithConference` fires), but the alias is empty.
+
+**Root cause:** `authenticatedWithConference` fires asynchronously after
+conference join. During plugin initialization, the alias isn't available via
+events yet.
+
+**Fix:** Parse the alias from the URL synchronously, then update from the
+event when it fires:
+```typescript
+const hashParams = new URLSearchParams(window.location.hash.split('?')[1] || '');
+let alias = hashParams.get('conference') || '';
+plugin.events.authenticatedWithConference.add((info) => {
+  alias = info.conferenceAlias;
 });
 ```

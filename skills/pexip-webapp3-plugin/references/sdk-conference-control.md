@@ -39,6 +39,16 @@ snake_case (`display_name`). Code that consumes both must handle this.
 You must convert: `target.role === 'chair' ? 'host' : target.role`.
 Passing `'chair'` to `setRole()` is silently rejected.
 
+**Display name preference:** For user-facing labels, prefer `overlay_text`
+over `display_name` — it contains the "formal" name set by the host or
+policy server. Fallback chain:
+
+```typescript
+const label = participant.overlay_text || participant.display_name || 'Participant';
+```
+
+**(field-tested)**
+
 ---
 
 ## setRole
@@ -135,31 +145,42 @@ Move a participant from an active conference back to the lobby. No direct
 async function sendToLobby(
   plugin: any,
   participantUuid: string,
+  displayName?: string,
 ): Promise<void> {
-  // 1. Demote to guest — ensures they return as guest (lobby-eligible)
-  await plugin.conference.setRole({ participantUuid, role: 'guest' });
+  try {
+    // 1. Demote to guest — ensures they return as guest (lobby-eligible)
+    await plugin.conference.setRole({ participantUuid, role: 'guest' });
 
-  // 2. Create a temporary breakout with transfer-back
-  const room = await plugin.conference.breakout({
-    name: 'lobby-transfer',
-    end_action: 'transfer',
-  });
+    // 2. Create a temporary breakout with transfer-back
+    const room = await plugin.conference.breakout({
+      name: 'lobby-transfer',
+      end_action: 'transfer',
+    });
 
-  // 3. Move participant into the breakout
-  await plugin.conference.breakoutMoveParticipants({
-    toRoomUuid: room.breakout_uuid,
-    participants: [participantUuid],
-  });
+    // 3. Move participant into the breakout
+    await plugin.conference.breakoutMoveParticipants({
+      toRoomUuid: room.breakout_uuid,
+      participants: [participantUuid],
+    });
 
-  // 4. Wait for the move to complete, then close the room
-  await new Promise((r) => setTimeout(r, 3000));
-  await plugin.conference.closeBreakoutRoom({
-    breakoutUuid: room.breakout_uuid,
-  });
+    // 4. Wait for the move to complete, then close the room
+    await new Promise((r) => setTimeout(r, 3000));
+    await plugin.conference.closeBreakoutRoom({
+      breakoutUuid: room.breakout_uuid,
+    });
 
-  // Participant transfers back to main room as guest → lands in lobby
+    plugin.ui.showToast({ message: `${displayName || 'Participant'} sent to lobby` });
+  } catch (error) {
+    console.error('Send to lobby failed:', error);
+    plugin.ui.showToast({
+      message: `Failed to send ${displayName || 'participant'} to lobby`,
+      isDanger: true,
+    });
+  }
 }
 ```
+
+Production plugins always wrap multi-step conference operations in try/catch with `isDanger` toast on failure and success toast on completion. **(field-tested)**
 
 This pattern is used in production by the send-to-lobby plugin (v13).
 The 3-second delay is necessary for Pexip to complete the room move before

@@ -5,7 +5,7 @@ description: >
   @pexip/plugin-api. Covers the plugin SDK (registration, events, UI
   buttons/toasts/forms, conference control, sendRequest), Vite project
   scaffold, branding ZIP structure and manifest.json, installing plugins
-  into brandings via the Management API, webapp alias routing, and 19
+  into brandings via the Management API, webapp alias routing, and 22
   production-tested gotchas. Use this skill whenever the user is building
   a webapp3 plugin, adding buttons or toasts to Pexip meetings, working
   with @pexip/plugin-api, packaging plugins into branding ZIPs, uploading
@@ -30,7 +30,7 @@ and toasts to the UI, and control the conference via RPC. They ship inside
 webapp3 client at meeting join time.
 
 This skill is distilled from building and operating three production plugins
-(chat relay, send-to-lobby, screenshare shortcut) and includes 19 non-obvious
+(chat relay, send-to-lobby, screenshare shortcut) and includes 22 non-obvious
 behaviours discovered through production debugging.
 
 > **Sourcing:** the canonical plugin API reference is
@@ -274,11 +274,29 @@ export default defineConfig({
 });
 ```
 
+**Deterministic filenames** — for simpler branding ZIP assembly, use Vite
+library mode to produce `assets/index.js` instead of `assets/index-HASH.js`:
+
+```typescript
+export default defineConfig({
+  base: './',
+  build: {
+    outDir: 'dist',
+    emptyOutDir: true,
+    lib: { entry: 'src/index.ts', formats: ['es'], fileName: 'assets/index' },
+    rollupOptions: { external: [] },
+  },
+});
+```
+
+Library mode is optional — both hashed and deterministic filenames work in
+branding ZIPs. **(common pattern)**
+
 **Build and package:**
 ```bash
 npm install
 npm run build
-# dist/ now contains assets/index-HASH.js
+# dist/ now contains assets/index-HASH.js (or assets/index.js in library mode)
 # IMPORTANT: copy index.html into dist/ — Vite doesn't do this automatically
 cp index.html dist/
 ```
@@ -287,9 +305,15 @@ The `dist/` folder contents go into the branding ZIP at `plugins/<plugin-id>/`.
 
 **Singleton guard** — prevents double-initialisation if the plugin iframe reloads:
 ```typescript
-if ((globalThis as any).__myPluginInit) throw new Error('duplicate');
-(globalThis as any).__myPluginInit = true;
+if ((globalThis as any).__myPluginInit) {
+  console.log('Plugin already initialized, skipping');
+} else {
+  (globalThis as any).__myPluginInit = true;
+  initializePlugin().catch(console.error);
+}
 ```
+
+Use silent return instead of throwing — `throw` creates noisy console output on plugin iframe reload. **(field-tested)**
 
 For working examples, see `examples/hello-world-plugin/` and
 `examples/participant-action-plugin/`.
@@ -374,9 +398,22 @@ Python and curl examples for each endpoint: `references/management-api-brandings
 
 ## 5. Testing and Debugging
 
-**Local development:** run `npx vite` for hot-reload on port 5173. Plugins
-cannot be tested standalone — they require the webapp3 host runtime. Deploy to
-a branding on a dev Pexip instance for integration testing.
+**Local development:** run `npx vite` for hot-reload on port 5173. Full plugin
+testing requires the webapp3 host runtime — deploy to a branding on a dev Pexip
+instance. For UI-only testing (toasts, buttons, forms), use a mock plugin API
+with environment detection:
+
+```typescript
+const isLocalDev = window.location.hostname === 'localhost'
+  && window.parent === window; // Not in iframe = not in webapp
+
+const plugin = isLocalDev
+  ? createMockPlugin()
+  : await registerPlugin({ id: 'my-plugin', version: 1 });
+```
+
+See `references/sdk-conference-control.md` for mock pattern details.
+**(field-tested)**
 
 **Two-participant constraint:** `plugin.events.message` only fires for other
 participants' messages. Chat features need 2+ participants to test.
@@ -422,6 +459,9 @@ support webapp3 plugins. Plugins require the full webapp3 runtime — test via
 | 17 | Embedded iframe | Plugins don't load | Use "Join with Browser" for full webapp3 |
 | 18 | CSP/iframe camera | Camera denied in embed | Align `frame-src`, `X-Frame-Options`, `Permissions-Policy` |
 | 19 | External POST missing alias | 404 from stateless server | Include `conference` in POST body |
+| 20 | Singleton guard throws on reload | Console error on iframe reload | Use silent `return` instead of `throw new Error` |
+| 21 | overlayText vs displayName | Wrong participant name in toasts | Prefer `overlay_text` / `overlayText` for user-facing labels |
+| 22 | Alias unavailable at init | Conference alias empty during setup | Parse from URL hash; update from `authenticatedWithConference` event |
 
 Expanded entries with reproduction steps and code fixes: `references/gotchas-and-pitfalls.md`
 
@@ -436,7 +476,7 @@ Expanded entries with reproduction steps and code fixes: `references/gotchas-and
 | `references/sdk-conference-control.md` | `sendRequest` paths, `setRole`, `requestParticipants`, breakout lifecycle |
 | `references/branding-zip-structure.md` | Branding ZIP anatomy, manifest.json schema, sandboxValues, alias routing |
 | `references/management-api-brandings.md` | CRUD endpoints for webapp_branding and webapp_alias with curl/Python |
-| `references/gotchas-and-pitfalls.md` | All 19 gotchas expanded with reproduction, root cause, and fix |
+| `references/gotchas-and-pitfalls.md` | All 22 gotchas expanded with reproduction, root cause, and fix |
 
 ---
 
