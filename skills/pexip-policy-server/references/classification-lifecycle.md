@@ -98,6 +98,126 @@ def apply_classification(conf_fqdn, alias, level, pin="", meeting_subject=""):
 
 ---
 
+## Token Refresh Fallback Chain
+
+Minimize "token churn" (each new token creates a Policy Server participant).
+Use a 4-step fallback:
+
+```python
+def get_or_refresh(self, conference_alias, pin=None):
+    cached_token, age = self.tokens.get(conference_alias)
+
+    # Step 1: Reuse young cached token
+    if cached_token and age < self.TOKEN_VALID_MAX:
+        return cached_token
+
+    # Step 2: Refresh (does NOT create a new PS participant)
+    if cached_token:
+        new_token = refresh_token(conference_alias, cached_token)
+        if new_token:
+            self.tokens.set(conference_alias, new_token)
+            return new_token
+
+    # Step 3: Validate old token via get_participants
+    if cached_token:
+        participants = get_participants(conference_alias, cached_token)
+        if participants is not None:
+            self.tokens.set(conference_alias, cached_token)  # renew timestamp
+            return cached_token
+
+    # Step 4: Request new token (last resort — creates new PS participant)
+    token, err = request_token(conference_alias, pin=pin)
+    if token:
+        self.tokens.set(conference_alias, token)
+    return token
+```
+
+**After requesting a new token, wait 1.5s** before calling
+`set_classification_level` — the new PS participant needs time to be admitted
+as chair. Without the delay, you get 403 "Invalid role":
+
+```python
+if not was_cached:
+    time.sleep(1.5)
+```
+
+Retry backoff differs by error type:
+- **Invalid token / 500**: `sleep(0.5 * (attempt + 1))` — 0.5s, 1s, 1.5s
+- **Invalid role (PS still joining)**: `sleep(1.5 * (attempt + 1))` — 1.5s, 3s, 4.5s
+
+**Never disconnect duplicate Policy Server participants after token refresh.**
+Disconnecting ANY PS participant can invalidate the token bound to it, causing
+a cascade: 403 → new token → new duplicate → disconnect → 403. Duplicates are
+harmless and clean up when the conference ends. **(field-tested)**
+
+---
+
+## Early Classification
+
+Don't wait for the event sink `participant_updated` — set the meeting
+classification level immediately in the `participant_properties` response
+path (the first moment you know a participant's level):
+
+```python
+if (is_idp_authenticated and not is_pexipdemo
+        and not _is_breakout(alias) and classification_level is not None):
+    if not flag_cache.is_set(alias, "early_classification"):
+        flag_cache.set(alias, "early_classification")
+        classification_mgr.update_level(alias, classification_level)
+```
+
+The flag ensures this fires only once per conference. Without early
+classification, there's a several-second delay while waiting for the
+event sink round-trip. **(field-tested)**
+
+---
+
+## Conference Generation Counter
+
+A conference can end and restart with the same alias. Use a SQLite-based
+generation counter to prevent stale cleanup threads from clearing caches
+that a restarted conference is actively using:
+
+```python
+# Schema
+# CREATE TABLE conference_generation (
+#     conference_alias TEXT PRIMARY KEY,
+#     generation INTEGER NOT NULL DEFAULT 0
+# );
+
+# On conference_started — increment generation (UPSERT)
+conn.execute(
+    "INSERT INTO conference_generation (conference_alias, generation) VALUES (?, 1) "
+    "ON CONFLICT(conference_alias) DO UPDATE SET generation = generation + 1",
+    (conference_alias,)
+)
+generation_at_start = get_generation(conference_alias)
+
+# In cleanup thread (background, after conference_ended)
+if get_generation(conference_alias) != generation_at_start:
+    return  # Conference restarted — abort cleanup
+```
+
+Pair with an `_ending_conferences` set that blocks new token requests
+during the cleanup window:
+
+```python
+_ending_conferences = set()
+
+# On conference_ended:
+_ending_conferences.add(conference_alias)
+
+# In get_or_refresh():
+if conference_alias in _ending_conferences:
+    return cached_token  # Don't create new PS during teardown
+```
+
+Without this, cleanup operations that trigger recalculation would request
+new tokens during teardown, creating ghost PS participants that keep the
+conference alive. **(field-tested)**
+
+---
+
 ## try_mark_classified() Pattern
 
 Atomic cross-worker dedup gate. With multiple Gunicorn workers, two concurrent

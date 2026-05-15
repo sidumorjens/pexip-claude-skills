@@ -1,6 +1,6 @@
 # Gotchas Expanded Reference
 
-All 34 production-tested gotchas with description, symptom, root cause, and fix.
+All 40 production-tested gotchas with description, symptom, root cause, and fix.
 
 ---
 
@@ -388,3 +388,80 @@ build_demo_branding(theme_name=name, instance_id=iid)
 # CORRECT
 build_demo_branding(name, iid)
 ```
+
+---
+
+## Token / Classification Lifecycle Gotchas
+
+### 35. Disconnecting duplicate Policy Server participants causes token cascade
+
+**Symptom:** After disconnecting a duplicate PS participant, a rapid cycle of 403 → new token → new PS → disconnect → 403 repeats until the conference ends.
+
+**Root cause:** Each Client API token is bound to a specific PS participant. Disconnecting that participant invalidates the token. The next API call gets 403, triggers a new token request (creating yet another PS), and if that duplicate is also disconnected, the cycle repeats.
+
+**Fix:** Never disconnect PS participants after token operations. Duplicates are harmless — they occupy no media resources and are automatically cleaned up when the conference ends.
+
+### 36. "Invalid role" 403 after requesting a new Client API token
+
+**Symptom:** `set_classification_level` returns 403 "Invalid role" immediately after obtaining a fresh token.
+
+**Root cause:** A new token creates a new Policy Server participant in the conference. This participant needs ~1-2 seconds to be fully admitted and assigned the chair role. API calls made before admission complete fail with "Invalid role".
+
+**Fix:** Wait 1.5 seconds after requesting a new token before making API calls:
+```python
+if not was_cached:
+    time.sleep(1.5)
+```
+Use different backoff strategies: 0.5s increments for token errors (transient), 1.5s increments for role errors (PS still joining).
+
+### 37. Breakout return contaminates participant remote_alias
+
+**Symptom:** After participants return from a breakout room, their cached `remote_alias` is overwritten with the conference alias, and `delete_duplicates_by_remote_alias` deletes unrelated participants.
+
+**Root cause:** When returning from breakout, Pexip sets `destination_alias` to the conference alias (the room being joined), not the participant's actual remote address.
+
+**Fix:** Before storing `remote_alias`, check if it matches the conference alias or parent alias (strip `_breakout_` suffix). If it matches, discard it:
+```python
+normalized_ra = _normalize_alias(remote_alias)
+normalized_conf = _normalize_alias(conference_alias)
+if normalized_ra == normalized_conf:
+    remote_alias = ""  # Contaminated
+```
+
+### 38. Conference restart cleanup race
+
+**Symptom:** A conference ends and restarts with the same alias. The cleanup thread from the old conference clears caches that the new conference is actively using.
+
+**Root cause:** Background cleanup threads use `conference_alias` as their key. If a conference restarts before cleanup completes, both the old cleanup thread and the new conference reference the same alias.
+
+**Fix:** Use a SQLite-backed generation counter. Increment on `conference_started`, capture the value, and abort cleanup if the generation has changed:
+```python
+generation_at_end = get_generation(conference_alias)
+# ... in cleanup thread:
+if get_generation(conference_alias) != generation_at_end:
+    return  # Conference restarted
+```
+
+### 39. Event sink service_type field name varies by Pexip version
+
+**Symptom:** Admission detection fails silently — participants are never detected as admitted on certain Pexip versions.
+
+**Root cause:** Some Pexip versions send `service_type` in event sink data, others send `current_service_type`. Code checking only one field name misses the other.
+
+**Fix:** Check both with OR fallback:
+```python
+service_type = data.get("service_type", "") or data.get("current_service_type", "")
+```
+
+### 40. New token request during conference teardown creates ghost participant
+
+**Symptom:** After conference ends, a new Policy Server participant appears briefly in Pexip admin, keeping the conference technically alive.
+
+**Root cause:** Cleanup operations (cache clearing, classification reset) can trigger `get_or_refresh()`, which requests a new token → creates a new PS participant → keeps the conference from fully ending.
+
+**Fix:** Track ending conferences in a set. Block new token requests (but still return cached tokens for cleanup reads):
+```python
+if conference_alias in _ending_conferences:
+    return cached_token  # No new PS during teardown
+```
+Clear the flag on `conference_started` (new conference) or after cleanup completes.

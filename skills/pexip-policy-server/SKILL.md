@@ -10,7 +10,7 @@ description: >
   format, Keycloak integration), conference classification via Client API
   (token lifecycle, cross-worker dedup, recalculation), event sink
   integration (admission detection, breakout migration, debounce), and
-  34 production-tested gotchas. Use when: building an external policy
+  40 production-tested gotchas. Use when: building an external policy
   server, implementing participant classification, handling
   service_configuration or participant_properties responses, serving
   avatar images, managing conference classification state, integrating
@@ -277,7 +277,7 @@ See `references/event-sink-patterns.md` for complete code patterns.
 
 ## SS6: Gotchas
 
-34 production-tested gotchas, grouped by category. Each is expanded with symptoms,
+40 production-tested gotchas, grouped by category. Each is expanded with symptoms,
 root cause, and fix in `references/gotchas-expanded.md`.
 
 ### Service Configuration
@@ -338,6 +338,12 @@ root cause, and fix in `references/gotchas-expanded.md`.
 | 30 | Conference state in `/tmp/conference_state.db` | Wrong DB queried | Separate from main app DB |
 | 31 | Client API `send_message` must use `text/plain` | Message not delivered | Set Content-Type explicitly |
 | 34 | `demo_branding.py` helpers use `*args` | kwargs silently break | Use positional args only |
+| 35 | Duplicate PS cascade | Disconnecting PS creates 403→token→duplicate loop | Never disconnect PS participants; they clean up at conference end |
+| 36 | New token 403 "Invalid role" | `set_classification_level` fails right after new token | Wait 1.5s for PS participant to be admitted before API calls |
+| 37 | Breakout return alias contamination | Participant remote_alias becomes conference alias | Strip destination_alias when it matches conference/parent alias |
+| 38 | Conference restart clears caches | Cleanup thread from old conference wipes new conference data | Use SQLite generation counter; abort cleanup if generation changed |
+| 39 | `service_type` field name varies | Admission check fails on some Pexip versions | Check both `service_type` and `current_service_type` with OR fallback |
+| 40 | New token during conference teardown | Ghost PS participant keeps conference alive | Block new token requests with `_ending_conferences` set during cleanup |
 
 ---
 
@@ -348,9 +354,9 @@ root cause, and fix in `references/gotchas-expanded.md`.
 | `references/service-config-validation.md` | ~200 | Full view set, PIN truth table, ADP format, response examples |
 | `references/participant-role-ladder.md` | ~200 | Role flowchart, IdP extraction, SIP matching, rejection code |
 | `references/avatar-requirements.md` | ~120 | User lookup chain, PIL pipeline, KC schema, full endpoint |
-| `references/classification-lifecycle.md` | ~200 | Token lifecycle, apply/mark/refresh/release, recalc flow |
-| `references/event-sink-patterns.md` | ~180 | Admission detection, breakout migration, debounce, polling |
-| `references/gotchas-expanded.md` | ~300 | All 34 gotchas with description, symptom, root cause, fix |
+| `references/classification-lifecycle.md` | ~410 | Token lifecycle, refresh fallback chain, early classification, generation counter, apply/mark/refresh/release, recalc flow |
+| `references/event-sink-patterns.md` | ~250 | Admission detection conditions, breakout alias decontamination, breakout migration, debounce, polling |
+| `references/gotchas-expanded.md` | ~500 | All 40 gotchas with description, symptom, root cause, fix |
 
 ### When NOT to Use This Skill
 

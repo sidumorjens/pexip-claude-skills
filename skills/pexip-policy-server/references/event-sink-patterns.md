@@ -126,6 +126,39 @@ marks the participant as admitted and triggers recalculation. Setting
 
 ---
 
+## Breakout Alias Decontamination
+
+When participants return from breakout rooms, Pexip sets `destination_alias`
+to the **conference alias** (the room they're joining), not the participant's
+actual remote alias. Using this contaminated value would:
+
+1. Overwrite the stored `remote_alias` with the conference alias
+2. Cause `delete_duplicates_by_remote_alias` to match unrelated participants
+
+Strip it before storing:
+
+```python
+def _decontaminate_alias(remote_alias, conference_alias):
+    """Strip conference alias from destination_alias on breakout return."""
+    if not remote_alias:
+        return ""
+    normalized_ra = _normalize_alias(remote_alias)
+    normalized_conf = _normalize_alias(conference_alias)
+    parent_alias = conference_alias.split("_breakout_")[0] if "_breakout_" in conference_alias else conference_alias
+    normalized_parent = _normalize_alias(parent_alias)
+    if normalized_ra == normalized_conf or normalized_ra == normalized_parent:
+        return ""  # Discard contaminated alias
+    return remote_alias
+
+def _normalize_alias(alias):
+    return str(alias).lower().replace("sip:", "").strip()
+```
+
+**(field-tested)** — Without this, participants returning from breakout rooms
+contaminate each other's cache entries.
+
+---
+
 ## Participant Matching
 
 Matching event sink participants to tracked state requires multiple strategies
@@ -149,6 +182,44 @@ def _find_participant(conference_alias, remote_alias, display_name):
 
     return None
 ```
+
+---
+
+## Admission Detection Conditions
+
+Admission is a multi-condition check. The primary check requires all five:
+
+```python
+is_actually_connected = connect_time is not None
+is_not_in_waiting_room = service_type not in ("waiting_room", "connecting")
+
+# IVR: null means "no IVR" — treat as complete
+is_ivr_complete = True
+if call_direction == "in" and ivr_video_complete is not None:
+    is_ivr_complete = ivr_video_complete
+
+is_admitted = (has_media and is_actually_connected and is_not_in_waiting_room
+               and is_ivr_complete and conference_alias and participant_uuid)
+```
+
+**Fallback for lobby → conference transition** (when `has_media` lags behind
+`service_type` in event data):
+
+```python
+if not is_admitted and is_actually_connected and is_not_in_waiting_room:
+    existing = participants.get(conference_alias, participant_uuid)
+    if existing and existing.get("level") is not None and not existing.get("is_admitted"):
+        is_admitted = True  # Lobby-to-conference transition detected
+```
+
+**Pexip version compatibility:** check both `service_type` and
+`current_service_type` — the field name varies:
+
+```python
+service_type = data.get("service_type", "") or data.get("current_service_type", "")
+```
+
+**(field-tested)**
 
 ---
 
