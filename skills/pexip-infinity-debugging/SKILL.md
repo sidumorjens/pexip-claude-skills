@@ -243,7 +243,7 @@ These are the first checks to run on a live system.
 - **Config replication:** Infinity takes ~30s to replicate config changes across the cluster (fires only when URL changes, not on content changes at the same URL) **(field-tested)**
 - **Policy cache:** Pexip caches FAILED policy responses for several minutes. Wait or create a new conference to test. **(field-tested)**
 - **Branding cache:** Clear Infinity API cache after branding mutations (clone/install/delete). Stale UUIDs cause 404. **(field-tested)**
-- **Server not running:** After Python edits, Flask must be restarted manually (`use_reloader=False`). Check `docker logs --tail 10 pdp-dev` for import errors. **(field-tested)**
+- **Server not running:** After Python edits, Flask must be restarted manually (`use_reloader=False`). Check `docker logs --tail 10 <your-container>` for import errors. **(field-tested)**
 - **Theme replication:** Branding theme changes require ~30s replication. Downloading immediately after upload may return the old version.
 
 ### ngrok issues

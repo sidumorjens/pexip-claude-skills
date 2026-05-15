@@ -111,7 +111,7 @@ Sorted by where the error is typically seen.
 |---|---|---|
 | `Connection refused` on policy URL | PDP server not running | Restart Flask: `lsof -ti:5555 \| xargs kill -9; python3 run-local.py &` **(field-tested)** |
 | `ERR_NGROK_3200` | ngrok tunnel expired (free tier 2h limit) | Restart ngrok; update policy server URL and event sink URL on Pexip **(field-tested)** |
-| `ImportError` in docker logs | Python file has syntax/import error after edit | Check `docker logs --tail 20 pdp-dev` for the specific error; fix and restart **(field-tested)** |
+| `ImportError` in docker logs | Python file has syntax/import error after edit | Check `docker logs --tail 20 <your-container>` for the specific error; fix and restart **(field-tested)** |
 | `Config replication timeout` | Pexip cluster nodes not syncing | Wait 30s+ for replication; if persistent, check node health **(common pattern)** |
 | `TLS handshake failed` | Self-signed cert rejected or cert chain incomplete | Use `verify=False` for self-signed Pexip certs; check intermediate CA certs **(field-tested)** |
 | `DNS resolution failed` | Conferencing node cannot resolve policy/event sink hostname | Check DNS config on Pexip nodes; use IP address as workaround |
