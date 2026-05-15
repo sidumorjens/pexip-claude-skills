@@ -7,6 +7,7 @@ A collection of [Claude Agent Skills](https://docs.claude.com/en/docs/agents-and
 | Skill | Purpose |
 |---|---|
 | [`pexip-external-policy`](skills/pexip-external-policy/) | Designing and implementing Pexip Infinity External Policy servers and local Jinja2 policy scripts. Covers all six request types, ABAC patterns, breakout rooms, and common gotchas. |
+| [`pexip-event-sink`](skills/pexip-event-sink/) | Building and operating Pexip Infinity Event Sink receivers — the webhook stream for conference and participant lifecycle events. Covers the wire protocol, the operational patterns (idempotency, fast ACK, durable persistence, replay), and common integrations (CDR/billing, BI, real-time dashboards). |
 | _(more to come)_ | |
 
 ## What is a Claude Skill?
