@@ -116,7 +116,7 @@ This repo uses single-tag semantic versioning across all skills. Tagged releases
 
 ## Licence
 
-See [`LICENSE`](LICENSE).
+[CC BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/) — free to share and adapt for non-commercial use, with attribution. See [`LICENSE`](LICENSE) for the full notice.
 
 ## Acknowledgements
 
