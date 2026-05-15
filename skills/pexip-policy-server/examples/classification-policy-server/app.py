@@ -67,7 +67,7 @@ def _is_breakout(alias):
     if not alias:
         return False
     s = alias.lower()
-    return "_breakout_" in s or s.startswith("breakout_")
+    return "_breakout_" in s or s.startswith("breakout_") or s.endswith("_breakout")
 
 
 def _json_ok(result):

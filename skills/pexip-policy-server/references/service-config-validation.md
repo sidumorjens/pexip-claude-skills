@@ -101,11 +101,11 @@ Pexip validates PINs server-side. These combinations have been tested:
 ### Safe PIN Patterns
 
 ```python
-# Pattern 1: Host-only locked conference
+# Pattern 1: Single-PIN locked conference (all users enter as host)
 result["allow_guests"] = True
 result["locked"] = True
 result["pin"] = "1234"
-# No guest_pin -- all users enter host PIN
+# No guest_pin -- everyone uses host PIN, enters as chair
 
 # Pattern 2: Host + Guest with different lengths
 pin = "1234"

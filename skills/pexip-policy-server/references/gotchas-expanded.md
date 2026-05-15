@@ -123,7 +123,7 @@ _release_stale_ps_participant(conf_fqdn, alias, old_token)
 new_token, err = request_token(conf_fqdn, alias, pin=pin)
 ```
 
-### 9. Cross-worker classification dedup needs SQLite INSERT OR IGNORE
+### 9. Cross-worker classification dedup needs SQLite UNIQUE constraint
 
 **Symptom:** Two Policy Server participants join simultaneously when concurrent IdP users join on different Gunicorn workers.
 

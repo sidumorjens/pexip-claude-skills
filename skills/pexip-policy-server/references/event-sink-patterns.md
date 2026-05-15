@@ -184,6 +184,11 @@ def clear_debounce(prefix):
         _debounce_set -= to_remove
 ```
 
+**Single-worker only:** This in-memory debounce uses `threading.Lock`, which does
+NOT work across Gunicorn worker processes. For multi-worker deployments, use
+SQLite-backed debounce (same pattern as cross-worker dedup in
+`classification-lifecycle.md`) or accept that each worker debounces independently.
+
 Usage in the event handler:
 ```python
 debounce_key = f"{conference_alias}:{matched_key}"
