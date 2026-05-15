@@ -85,8 +85,10 @@ plugin.events.authenticatedWithConference.add((info) => {
 });
 ```
 
-**Critical rule:** callbacks receive the value **directly** — never destructure
-as `({value}) =>`. The signal pattern passes the payload itself, not a wrapper.
+**Critical rule:** callbacks receive the payload **directly** — never destructure
+as `({value}) =>` (there is no `value` wrapper). You can destructure the
+payload's own fields, e.g. `({ participants }) =>`, but not a non-existent
+outer wrapper.
 
 | Event | Fires when | Key fields |
 |---|---|---|

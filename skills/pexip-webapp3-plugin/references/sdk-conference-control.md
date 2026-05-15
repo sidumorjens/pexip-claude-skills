@@ -21,7 +21,7 @@ interface RpcParticipant {
   uuid: string;
   display_name: string;     // NOT displayName
   overlay_text: string;     // NOT overlayText
-  role: 'chair' | 'guest'; // 'chair' in RPC, 'host' in events
+  role: 'chair' | 'guest'; // ⚠️ RPC returns 'chair', but setRole() requires 'host'
   protocol: string;
   is_muted: string;         // "Yes" / "No" (string, not boolean)
   is_presenting: string;
@@ -34,6 +34,10 @@ interface RpcParticipant {
 **Case convention split:** events use camelCase (`displayName`), RPC uses
 snake_case (`display_name`). Code that consumes both must handle this.
 **(field-tested)**
+
+**Role mapping:** RPC returns `'chair'` but `setRole()` requires `'host'`.
+You must convert: `target.role === 'chair' ? 'host' : target.role`.
+Passing `'chair'` to `setRole()` is silently rejected.
 
 ---
 
